@@ -676,6 +676,7 @@ addEventListener('keydown',e=>{
   else if(e.key==='ArrowUp') S.pitch=Math.min(89.9,S.pitch+st); else if(e.key==='ArrowDown') S.pitch=Math.max(-89.9,S.pitch-st);
   else if(e.key==='+'||e.key==='=') S.fov=Math.max(FMIN,S.fov/1.15); else if(e.key==='-') S.fov=Math.min(300,S.fov*1.15);
   else if(e.key===' ') { setThrust(S.thrust?0:1); e.preventDefault(); }
+  else if(e.key==='f'||e.key==='F') { PERF.on=!PERF.on; }
   else return;
   fovEl.value=fovToSlider(S.fov); requestDraw();
 });
@@ -833,14 +834,36 @@ function drawOverlay(k){
 }
 
 // ===================================================================== render loop
-let last=performance.now(), lastVkey='';
+let last=performance.now(), lastVkey='', lastDom=0;
 function resize(){
   const dpr=Math.min(devicePixelRatio||1,2);
   const w=Math.round(innerWidth*dpr), h=Math.round(innerHeight*dpr);
   if(cv.width!==w||cv.height!==h){ cv.width=ov.width=w; cv.height=ov.height=h; need=true; }
   return dpr;
 }
+// control-panel rectangle, measured only when it changes (reading layout every frame forces a synchronous reflow)
+let ctlRect=null;
+function measureCtl(){ const c=$('ctl'); ctlRect=c.classList.contains('hidden')?null:c.getBoundingClientRect(); need=true; }
+new ResizeObserver(measureCtl).observe($('ctl'));
+$('ctl').addEventListener('transitionend',measureCtl);
+addEventListener('resize',()=>setTimeout(measureCtl,0));
+// frame-time diagnostics: press F to toggle
+const PERF={on:false,dt:new Float32Array(240),js:new Float32Array(240),i:0,long:[]};
+function drawPerf(){
+  if(!PERF.on) return;
+  const w=260, h=70, x0=Math.max(8,view.vx1-w-10), y0=view.vx1<innerWidth*0.95?8:innerHeight*0.25;
+  ctx.fillStyle='rgba(0,0,0,.65)'; ctx.fillRect(x0,y0,w,h+34);
+  ctx.strokeStyle='rgba(255,255,255,.25)'; ctx.beginPath(); for(const ms of [16.7,33.3]){ const y=y0+h-ms*2; ctx.moveTo(x0,y); ctx.lineTo(x0+w,y);} ctx.stroke();
+  let mx=0, sum=0;
+  for(let j=0;j<240;j++){ const k=(PERF.i+j)%240, d=PERF.dt[k], js=PERF.js[k]; mx=Math.max(mx,d); sum+=d;
+    ctx.fillStyle=d>33?'#f66':d>20?'#fc6':'#6c6'; ctx.fillRect(x0+j*w/240,y0+h-Math.min(h,d*2),w/240,Math.min(h,d*2));
+    ctx.fillStyle='#6af'; ctx.fillRect(x0+j*w/240,y0+h-Math.min(h,js*2),w/240,Math.min(h,js*2)); }
+  ctx.fillStyle='#ddd'; ctx.font='11px system-ui,sans-serif';
+  ctx.fillText(`avg ${(sum/240).toFixed(1)} ms  worst ${mx.toFixed(0)} ms  (blue = script time)`,x0+4,y0+h+10);
+  ctx.fillText('last long frames: '+PERF.long.slice(-4).join(', '),x0+4,y0+h+25);
+}
 function frame(now){
+  const tJs=performance.now();
   const dt=Math.min(0.25,(now-last)/1000); last=now;
   const dpr=resize();
   if(S.thrust){
@@ -855,9 +878,8 @@ function frame(now){
   const rEdge=2*Math.tan(S.fov*D2R/4);
   // visible area = window minus the control panel (right side on wide screens, bottom sheet on narrow ones)
   const cw=innerWidth, ch=innerHeight; let vx0=0,vy0=0,vx1=cw,vy1=ch;
-  const ctl=$('ctl');
-  if(!ctl.classList.contains('hidden')){
-    const r=ctl.getBoundingClientRect();
+  if(ctlRect){
+    const r=ctlRect;
     if(r.width<cw*0.6) vx1=Math.max(cw*0.3,r.left); else vy1=Math.max(ch*0.3,r.top);
   }
   const vcx=(vx0+vx1)/2, vcy=(vy0+vy1)/2, halfVisW=(vx1-vx0)/2;
@@ -866,7 +888,7 @@ function frame(now){
   const halfDiag=2*Math.atan(far/pxPerUnit/2);
   const visDiag=2*Math.atan(Math.hypot(halfVisW,(vy1-vy0)/2)/pxPerUnit/2);
   view={F:C.F,U:C.U,R:C.R,sx:pxPerUnit/(cw/2),sy:pxPerUnit/(ch/2),ox:(vcx-cw/2)/(cw/2),oy:-(vcy-ch/2)/(ch/2),
-        rEdge,halfVisW,dpr,halfDiag:visDiag,clip:Math.cos(Math.min(halfDiag+0.2,Math.PI*0.985))};
+        rEdge,halfVisW,dpr,vx1,halfDiag:visDiag,clip:Math.cos(Math.min(halfDiag+0.2,Math.PI*0.985))};
   const vkey=[vx1,vy1,cw,ch].join(); if(vkey!==lastVkey){ lastVkey=vkey; need=true; }
   // exposure / eye adaptation
   let target=S.ev;
@@ -875,6 +897,7 @@ function frame(now){
   if(Math.abs(dl)>1e-3){ S.logK+= dl*Math.min(1,dt*4); if(Math.abs(target-S.logK)<0.01) S.logK=target; need=true; }
   view.logK10=S.logK*0.30103;
   if(!need){ requestAnimationFrame(frame); return; }
+  if(PERF.on){ const d=Math.min(250,dt*1000); PERF.dt[PERF.i]=d; if(d>33) { PERF.long.push(Math.round(d)+'ms@β'+k.b.toFixed(3)); if(PERF.long.length>20) PERF.long.shift(); console.log('long frame',d.toFixed(1),'ms, beta',k.b); } }
   need=false;
   const K=Math.pow(2,S.logK);
   gl.viewport(0,0,W,H);
@@ -903,10 +926,15 @@ function frame(now){
   gl.bindVertexArray(starVAO); gl.drawArrays(gl.POINTS,0,STAR.n);
   gl.bindVertexArray(null);
   drawOverlay(k);
-  updateHUD(k);
-  const ht=headingText(); if(ht!==lastHeadTxt){ $('headV').textContent=ht; lastHeadTxt=ht; }
-  if(!drag) spd.value=phiToSlider(S.phi);
-  $('fovV').textContent=S.fov<1?S.fov.toFixed(2)+'°':S.fov<10?S.fov.toFixed(1)+'°':Math.round(S.fov)+'°';
+  // text readouts: refresh at most ~8 times a second (each DOM change costs a style/layout pass)
+  if(now-lastDom>120 || !S.thrust){
+    lastDom=now;
+    updateHUD(k);
+    const ht=headingText(); if(ht!==lastHeadTxt){ $('headV').textContent=ht; lastHeadTxt=ht; }
+    const sv=phiToSlider(S.phi); if(!drag && +spd.value!==sv) spd.value=sv;
+    setT('fovV',S.fov<1?S.fov.toFixed(2)+'°':S.fov<10?S.fov.toFixed(1)+'°':Math.round(S.fov)+'°');
+  }
+  if(PERF.on){ PERF.js[PERF.i]=performance.now()-tJs; PERF.i=(PERF.i+1)%240; drawPerf(); need=true; }
   requestAnimationFrame(frame);
 }
 addEventListener('resize',requestDraw);
