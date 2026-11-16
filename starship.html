@@ -269,6 +269,7 @@ uniform float uBeta, uOmb, uGamma; // beta, 1-beta (stable), gamma
 uniform vec3 uFlags;      // aberration, colour, beaming
 uniform vec3 uCR, uCU, uCF; // camera right, up, forward
 uniform vec2 uScale;      // stereographic -> NDC
+uniform vec2 uOff;        // NDC offset of the view centre (keeps it clear of the control panel)
 uniform float uClipZ;
 uniform highp sampler2D uLut;
 const float LT0=${LT0.toFixed(1)}, LT1=${LT1.toFixed(1)}, LUTN=${LUTN}.0;
@@ -297,7 +298,7 @@ vec3 deaberrate(vec3 d, out float D){
 }
 vec2 project(vec3 o, out float z){
   vec3 c=vec3(dot(o,uCR),dot(o,uCU),dot(o,uCF)); z=c.z;
-  return 2.0*c.xy/max(1.0+c.z,1e-6)*uScale;
+  return 2.0*c.xy/max(1.0+c.z,1e-6)*uScale+uOff;
 }
 float log10(float x){ return log2(x)*0.30103; }
 `;
@@ -309,7 +310,7 @@ in vec2 vP; out vec4 o;
 uniform highp samplerCube uSky;
 uniform float uK, uGain;
 void main(){
-  vec2 p=vP/uScale; float q=dot(p,p);
+  vec2 p=(vP-uOff)/uScale; float q=dot(p,p);
   vec3 dc=vec3(4.0*p,4.0-q)/(4.0+q);
   vec3 d=normalize(uCR*dc.x+uCU*dc.y+uCF*dc.z);
   float D; vec3 r=deaberrate(d,D);
@@ -557,7 +558,7 @@ function projJS(o){
   const x=dot(o,view.R), y=dot(o,view.U), z=dot(o,view.F);
   if(z<view.clip) return null;
   const s=2/Math.max(1+z,1e-9);
-  return [ (1+x*s*view.sx)*0.5*ov.width/view.dpr, (1-y*s*view.sy)*0.5*ov.height/view.dpr, z ];
+  return [ (1+x*s*view.sx+view.ox)*0.5*ov.width/view.dpr, (1-y*s*view.sy-view.oy)*0.5*ov.height/view.dpr, z ];
 }
 
 // ===================================================================== exposure model
@@ -590,7 +591,7 @@ let turn=null; // {from,to,yaw0,pitch0,t0}
 function screenToObserved(cx,cy){
   const W=cv.clientWidth, H=cv.clientHeight;
   const nx=(cx/W)*2-1, ny=1-(cy/H)*2;
-  const px=nx/view.sx, py=ny/view.sy, q=px*px+py*py;
+  const px=(nx-view.ox)/view.sx, py=(ny-view.oy)/view.sy, q=px*px+py*py;
   const dc=[4*px/(4+q),4*py/(4+q),(4-q)/(4+q)];
   return norm(add(add(scl(view.R,dc[0]),view.U,dc[1]),view.F,dc[2]));
 }
@@ -644,7 +645,7 @@ let drag=null, pinch=null, lastTap=null;
 cv.addEventListener('pointerdown',e=>{ cv.setPointerCapture(e.pointerId); drag={x:e.clientX,y:e.clientY,x0:e.clientX,y0:e.clientY,id:e.pointerId}; cv.classList.add('drag'); });
 cv.addEventListener('pointermove',e=>{
   if(!drag||e.pointerId!==drag.id||pinch) return;
-  const radPx=2*view.rEdge/(cv.clientWidth); // radians per CSS px at centre
+  const radPx=view.rEdge/view.halfVisW; // radians per CSS px at centre
   S.yaw-=(e.clientX-drag.x)*radPx*R2D; S.pitch+=(e.clientY-drag.y)*radPx*R2D;
   S.pitch=Math.max(-89.9,Math.min(89.9,S.pitch)); S.yaw=((S.yaw+540)%360)-180;
   drag.x=e.clientX; drag.y=e.clientY; requestDraw();
@@ -826,7 +827,7 @@ function drawOverlay(k){
 }
 
 // ===================================================================== render loop
-let last=performance.now();
+let last=performance.now(), lastVkey='';
 function resize(){
   const dpr=Math.min(devicePixelRatio||1,2);
   const w=Math.round(innerWidth*dpr), h=Math.round(innerHeight*dpr);
@@ -846,8 +847,21 @@ function frame(now){
   // camera
   const C=camBasis(), W=cv.width, H=cv.height, aspect=W/H;
   const rEdge=2*Math.tan(S.fov*D2R/4);
-  const halfDiag=2*Math.atan(rEdge*Math.hypot(1,1/aspect)/2);
-  view={F:C.F,U:C.U,R:C.R,sx:1/rEdge,sy:aspect/rEdge,rEdge,dpr,halfDiag,clip:Math.cos(Math.min(halfDiag+0.2,Math.PI*0.985))};
+  // visible area = window minus the control panel (right side on wide screens, bottom sheet on narrow ones)
+  const cw=innerWidth, ch=innerHeight; let vx0=0,vy0=0,vx1=cw,vy1=ch;
+  const ctl=$('ctl');
+  if(!ctl.classList.contains('hidden')){
+    const r=ctl.getBoundingClientRect();
+    if(r.width<cw*0.6) vx1=Math.max(cw*0.3,r.left); else vy1=Math.max(ch*0.3,r.top);
+  }
+  const vcx=(vx0+vx1)/2, vcy=(vy0+vy1)/2, halfVisW=(vx1-vx0)/2;
+  const pxPerUnit=halfVisW/rEdge;                       // CSS px per stereographic unit
+  const far=Math.max(Math.hypot(vcx,vcy),Math.hypot(cw-vcx,vcy),Math.hypot(vcx,ch-vcy),Math.hypot(cw-vcx,ch-vcy));
+  const halfDiag=2*Math.atan(far/pxPerUnit/2);
+  const visDiag=2*Math.atan(Math.hypot(halfVisW,(vy1-vy0)/2)/pxPerUnit/2);
+  view={F:C.F,U:C.U,R:C.R,sx:pxPerUnit/(cw/2),sy:pxPerUnit/(ch/2),ox:(vcx-cw/2)/(cw/2),oy:-(vcy-ch/2)/(ch/2),
+        rEdge,halfVisW,dpr,halfDiag:visDiag,clip:Math.cos(Math.min(halfDiag+0.2,Math.PI*0.985))};
+  const vkey=[vx1,vy1,cw,ch].join(); if(vkey!==lastVkey){ lastVkey=vkey; need=true; }
   // exposure / eye adaptation
   let target=S.ev;
   if(S.auto){ const L=viewPeakLum(k); target+= -0.8*Math.max(0,Math.log2(L/(SKY_AVG*4))); }
@@ -863,7 +877,7 @@ function frame(now){
     gl.uniform3fv(u.uF,S.head); gl.uniform1f(u.uBeta,k.b); gl.uniform1f(u.uOmb,k.omb); gl.uniform1f(u.uGamma,k.g);
     gl.uniform3f(u.uFlags,S.ab?1:0,S.col?1:0,S.beam?1:0);
     gl.uniform3fv(u.uCR,C.R); gl.uniform3fv(u.uCU,C.U); gl.uniform3fv(u.uCF,C.F);
-    gl.uniform2f(u.uScale,view.sx,view.sy); gl.uniform1f(u.uClipZ,view.clip);
+    gl.uniform2f(u.uScale,view.sx,view.sy); gl.uniform2f(u.uOff,view.ox,view.oy); gl.uniform1f(u.uClipZ,view.clip);
     if(u.uLut) gl.uniform1i(u.uLut,0); };
   gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,lutTex);
   gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_CUBE_MAP,skyTex);
