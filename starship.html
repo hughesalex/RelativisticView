@@ -6,7 +6,7 @@
 <title>Relativistic Starship View</title>
 <style>
 :root{
-  --bg:#000; --panel:rgba(12,16,26,.86); --line:rgba(140,170,220,.18); --text:#dfe7f5; --dim:#8c9ab3;
+  --bg:#000; --panel:rgba(12,16,26,.62); --line:rgba(140,170,220,.18); --text:#dfe7f5; --dim:#8c9ab3;
   --accent:#7fb2ff; --warm:#ffb46b; --cool:#8fc8ff; --good:#9be59b;
 }
 *{box-sizing:border-box}
@@ -15,7 +15,7 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:13px/
 #gl{cursor:grab;touch-action:none}
 #gl.drag{cursor:grabbing}
 #ov{pointer-events:none}
-.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)}
 #hud{position:fixed;left:12px;top:12px;padding:10px 12px;min-width:240px;max-width:330px;pointer-events:none}
 #hud .speed{font-size:26px;font-weight:600;letter-spacing:.3px;font-variant-numeric:tabular-nums}
 #hud .speed small{font-size:14px;color:var(--dim);font-weight:400}
