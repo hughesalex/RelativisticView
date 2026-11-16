@@ -123,7 +123,7 @@ details p{margin:6px 0;color:var(--text);font-size:12px}
   </section>
   <section>
     <h2>Display</h2>
-    <label><input type="checkbox" id="fAuto" checked> Eye adaptation (auto exposure)</label>
+    <label><input type="checkbox" id="fAuto"> Eye adaptation (auto exposure)</label>
     <div class="row"><span class="lbl">Exposure</span><input type="range" id="ev" min="-8" max="8" step="0.25" value="0"><span class="val" id="evV">0 EV</span></div>
     <div class="row"><span class="lbl">Star colour</span><input type="range" id="sat" min="0" max="3" step="0.05" value="1.5"><span class="val" id="satV">1.5×</span></div>
     <div class="row"><span class="lbl">Milky Way</span><input type="range" id="mwg" min="0" max="3" step="0.05" value="1"><span class="val" id="mwgV">1×</span></div>
@@ -523,7 +523,7 @@ const S = {
   phi:0,               // rapidity
   head:radec(HEADINGS[0][1],HEADINGS[0][2]),
   yaw:0, pitch:0, fov:90,
-  ab:true, col:true, beam:true, auto:true, ev:0, sat:1.5, mwg:1,
+  ab:true, col:true, beam:true, auto:false, ev:0, sat:1.5, mwg:1,
   thrust:0, g:1, warp:1/12,
   logK:0,              // current exposure (log2), smoothed
 };
