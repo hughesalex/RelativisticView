@@ -848,11 +848,25 @@ new ResizeObserver(measureCtl).observe($('ctl'));
 $('ctl').addEventListener('transitionend',measureCtl);
 addEventListener('resize',()=>setTimeout(measureCtl,0));
 // frame-time diagnostics: press F to toggle
-const PERF={on:false,dt:new Float32Array(240),js:new Float32Array(240),i:0,long:[]};
+const PERF={on:false,dt:new Float32Array(240),js:new Float32Array(240),i:0,long:[],loaf:[]};
+// Long Animation Frame API (Chromium): breaks a slow frame into script / rendering / style+layout time on the main thread
+try{
+  new PerformanceObserver(list=>{
+    for(const e of list.getEntries()){
+      if(!PERF.on||e.duration<45) continue;
+      const end=e.startTime+e.duration, scr=(e.scripts||[]).reduce((a,x)=>a+x.duration,0);
+      const sl=e.styleAndLayoutStart?end-e.styleAndLayoutStart:0, rd=e.renderStart?(e.styleAndLayoutStart||end)-e.renderStart:0;
+      const top=(e.scripts||[]).sort((a,b)=>b.duration-a.duration)[0];
+      const txt=`${Math.round(e.duration)}ms main-thread: script ${Math.round(scr)}, rAF ${Math.round(rd)}, style/layout ${Math.round(sl)}, other ${Math.round(e.duration-scr-rd-sl)}`+(top?` [${top.invoker||''} ${Math.round(top.duration)}ms]`:'');
+      PERF.loaf.push(txt); if(PERF.loaf.length>3) PERF.loaf.shift(); console.log('LoAF',txt,e);
+    }
+  }).observe({type:'long-animation-frame',buffered:false});
+  PERF.loafOK=true;
+}catch(err){ PERF.loafOK=false; }
 function drawPerf(){
   if(!PERF.on) return;
-  const w=260, h=70, x0=Math.max(8,view.vx1-w-10), y0=view.vx1<innerWidth*0.95?8:innerHeight*0.25;
-  ctx.fillStyle='rgba(0,0,0,.65)'; ctx.fillRect(x0,y0,w,h+34);
+  const w=420, h=70, x0=Math.max(8,view.vx1-w-10), y0=view.vx1<innerWidth*0.95?8:innerHeight*0.25;
+  ctx.fillStyle='rgba(0,0,0,.75)'; ctx.fillRect(x0,y0,w,h+34+15*Math.max(1,PERF.loaf.length));
   ctx.strokeStyle='rgba(255,255,255,.25)'; ctx.beginPath(); for(const ms of [16.7,33.3]){ const y=y0+h-ms*2; ctx.moveTo(x0,y); ctx.lineTo(x0+w,y);} ctx.stroke();
   let mx=0, sum=0;
   for(let j=0;j<240;j++){ const k=(PERF.i+j)%240, d=PERF.dt[k], js=PERF.js[k]; mx=Math.max(mx,d); sum+=d;
@@ -860,7 +874,10 @@ function drawPerf(){
     ctx.fillStyle='#6af'; ctx.fillRect(x0+j*w/240,y0+h-Math.min(h,js*2),w/240,Math.min(h,js*2)); }
   ctx.fillStyle='#ddd'; ctx.font='11px system-ui,sans-serif';
   ctx.fillText(`avg ${(sum/240).toFixed(1)} ms  worst ${mx.toFixed(0)} ms  (blue = script time)`,x0+4,y0+h+10);
-  ctx.fillText('last long frames: '+PERF.long.slice(-4).join(', '),x0+4,y0+h+25);
+  ctx.fillText('long frames: '+PERF.long.slice(-4).join(', '),x0+4,y0+h+25);
+  if(!PERF.loafOK) ctx.fillText('(main-thread breakdown not supported in this browser)',x0+4,y0+h+40);
+  else if(!PERF.loaf.length) ctx.fillText('no long main-thread frames recorded yet',x0+4,y0+h+40);
+  PERF.loaf.forEach((t,i)=>ctx.fillText(t,x0+4,y0+h+40+15*i));
 }
 function frame(now){
   const tJs=performance.now();
