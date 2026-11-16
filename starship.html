@@ -15,7 +15,7 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:13px/
 #gl{cursor:grab;touch-action:none}
 #gl.drag{cursor:grabbing}
 #ov{pointer-events:none}
-.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px}
 #hud{position:fixed;left:12px;top:12px;padding:10px 12px;width:340px;pointer-events:none}
 #hud .speed{font-size:26px;font-weight:600;letter-spacing:.3px;font-variant-numeric:tabular-nums}
 #hud .speed small{font-size:14px;color:var(--dim);font-weight:400}
@@ -393,6 +393,16 @@ function compile(vs, fs){
   const u={}, n=gl.getProgramParameter(p,gl.ACTIVE_UNIFORMS);
   for(let i=0;i<n;i++){const a=gl.getActiveUniform(p,i); u[a.name]=gl.getUniformLocation(p,a.name);}
   return {p,u};
+}
+// the diffuse sky is smooth, so it is rendered at half resolution and scaled up (a quarter of the pixel shading)
+const bgFB=gl.createFramebuffer(), bgTex=gl.createTexture(); let bgW=0,bgH=0;
+function bgTarget(W,H){
+  const w=Math.max(1,Math.ceil(W/2)), h=Math.max(1,Math.ceil(H/2));
+  if(w!==bgW||h!==bgH){ bgW=w; bgH=h;
+    gl.bindTexture(gl.TEXTURE_2D,bgTex); gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA8,w,h,0,gl.RGBA,gl.UNSIGNED_BYTE,null);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+    gl.bindFramebuffer(gl.FRAMEBUFFER,bgFB); gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,bgTex,0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER,null); }
 }
 const MAX_POINT=gl.getParameter(gl.ALIASED_POINT_SIZE_RANGE)[1]; // query once: getParameter can stall the GPU pipeline
 const P_BG=compile(VS_BG,FS_BG), P_STAR=compile(VS_STAR,FS_STAR), P_LINE=compile(VS_LINE,FS_LINE);
@@ -784,9 +794,13 @@ function updateHUD(k){
 const DSO_DIRS=DSOS.map(d=>[d[0],radec(d[1],d[2])]);
 const STAR_LABELS=SKY.names.filter(([i,nm])=>STAR.arr[i*5+3]<=1.6||['Polaris','Rigil Kentaurus','Alnilam','Mizar'].includes(nm)).map(([i,nm])=>[nm,[STAR.arr[i*5],STAR.arr[i*5+1],STAR.arr[i*5+2]]]);
 const CON_LABELS=SKY.clabels.map(([n,ra,dec])=>[n,radec(ra,dec)]);
+let ovShown=true;
 function drawOverlay(k){
   const dpr=view.dpr, W=ov.width/dpr, H=ov.height/dpr;
+  const any=PERF.on||['oGuide','oDso','oStar','oCon'].some(id=>$(id).checked);
+  if(any!==ovShown){ ovShown=any; ov.style.display=any?'':'none'; }
   ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,W,H);
+  if(!any) return;
   ctx.font='12px system-ui,-apple-system,Segoe UI,sans-serif'; ctx.textBaseline='middle';
   const taken=[];
   const free=(x,y,w,h)=>{ for(const t of taken) if(x<t[0]+t[2]&&x+w>t[0]&&y<t[1]+t[3]&&y+h>t[1]) return false; taken.push([x,y,w,h]); return true; };
@@ -932,8 +946,6 @@ function frame(now){
   need=false;
   const K=Math.pow(2,S.logK);
   const gq=gpuBegin();
-  gl.viewport(0,0,W,H);
-  gl.clearColor(0,0,0,1); gl.clear(gl.COLOR_BUFFER_BIT);
   const setCommon=P=>{ const u=P.u; gl.useProgram(P.p);
     gl.uniform3fv(u.uF,S.head); gl.uniform1f(u.uBeta,k.b); gl.uniform1f(u.uOmb,k.omb); gl.uniform1f(u.uGamma,k.g);
     gl.uniform3f(u.uFlags,S.ab?1:0,S.col?1:0,S.beam?1:0);
@@ -942,11 +954,17 @@ function frame(now){
     if(u.uLut) gl.uniform1i(u.uLut,0); };
   gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,lutTex);
   gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_CUBE_MAP,skyTex);
-  // background
+  // background: render at half resolution, then stretch it over the full canvas
   if(skyReady){
+    bgTarget(W,H);
+    gl.bindFramebuffer(gl.FRAMEBUFFER,bgFB); gl.viewport(0,0,bgW,bgH);
     setCommon(P_BG); gl.uniform1i(P_BG.u.uSky,1); gl.uniform1f(P_BG.u.uK,K); gl.uniform1f(P_BG.u.uGain,2.4e-4*S.mwg);
     gl.disable(gl.BLEND); gl.bindVertexArray(quad); gl.drawArrays(gl.TRIANGLES,0,3);
-  }
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER,bgFB); gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER,null);
+    gl.blitFramebuffer(0,0,bgW,bgH,0,0,W,H,gl.COLOR_BUFFER_BIT,gl.LINEAR);
+    gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+  } else { gl.clearColor(0,0,0,1); gl.clear(gl.COLOR_BUFFER_BIT); }
+  gl.viewport(0,0,W,H);
   gl.enable(gl.BLEND); gl.blendFunc(gl.ONE,gl.ONE);
   if($('oLines').checked){
     setCommon(P_LINE); gl.uniform3f(P_LINE.u.uC,0.16,0.24,0.42); gl.uniform1f(P_LINE.u.uFadeZ,view.clip);
