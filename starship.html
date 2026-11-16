@@ -261,7 +261,7 @@ const STAR = (function(){
 
 // ===================================================================== WebGL
 const cv=$('gl'), ov=$('ov'), ctx=ov.getContext('2d');
-const gl=cv.getContext('webgl2',{antialias:false,alpha:false,premultipliedAlpha:false,preserveDrawingBuffer:true});
+const gl=cv.getContext('webgl2',{antialias:false,alpha:false,premultipliedAlpha:false,preserveDrawingBuffer:false});
 if(!gl){ const e=$('err'); e.style.display='flex'; e.textContent='Sorry, this page needs WebGL 2, which your browser or device does not provide.'; throw new Error('no webgl2'); }
 
 const GLSL_COMMON = `#version 300 es
@@ -355,7 +355,7 @@ void main(){
   float sig=0.75*uPx*max(1.0,pow(E,0.22));
   float pk=E/(6.2832*sig*sig/(uPx*uPx));
   vHalo = E>30.0 ? min(0.25,0.012*log2(E/30.0+1.0)) : 0.0;
-  float rad = sig*3.2 + (vHalo>0.0 ? sig*6.0 : 0.0);
+  float rad = sig*3.2 + (vHalo>0.0 ? sig*3.0 : 0.0);  // keep sprites small: big halos x thousands of stars = heavy overdraw
   gl_PointSize=min(2.0*rad+1.0,uMaxPt);
   gl_Position=vec4(p,0,1);
   vCol=ch; vSig=sig/(gl_PointSize*0.5); vPk=pk;
@@ -393,6 +393,7 @@ function compile(vs, fs){
   for(let i=0;i<n;i++){const a=gl.getActiveUniform(p,i); u[a.name]=gl.getUniformLocation(p,a.name);}
   return {p,u};
 }
+const MAX_POINT=gl.getParameter(gl.ALIASED_POINT_SIZE_RANGE)[1]; // query once: getParameter can stall the GPU pipeline
 const P_BG=compile(VS_BG,FS_BG), P_STAR=compile(VS_STAR,FS_STAR), P_LINE=compile(VS_LINE,FS_LINE);
 
 // LUT texture
@@ -758,19 +759,22 @@ function fmtAng(k){ // max aberration shift = at rest angle where shift is large
   return fmtDeg(best*R2D);
 }
 
+const _dom={};
+function setT(id,v){ if(_dom[id]===v) return; _dom[id]=v; $(id).textContent=v; } // only touch the DOM when text changes
+function setH(id,v){ if(_dom[id]===v) return; _dom[id]=v; $(id).innerHTML=v; }
 function updateHUD(k){
-  $('hSpeed').innerHTML=(k.u===0?'0':fmtBeta(k))+' <small>c</small>';
-  $('hKms').textContent=k.u===0?'0 km/s':(k.b*299792.458<1e5?Math.round(k.b*299792.458).toLocaleString()+' km/s':(k.b*299792.458).toLocaleString(undefined,{maximumFractionDigits:3})+' km/s');
-  $('hGamma').textContent=k.g<1.0001?k.g.toFixed(8):k.g<10?k.g.toFixed(4):fmtNum(k.g);
-  $('hDf').textContent='×'+(k.Df<10?k.Df.toFixed(4):fmtNum(k.Df))+' (bluer)';
-  $('hDb').textContent='×'+(k.Db>0.1?k.Db.toFixed(4):fmtNum(k.Db))+' (redder)';
-  $('hHalf').textContent=fmtDeg(Math.acos(k.b)*R2D)+' of the bow';
-  $('hShift').textContent=k.u===0?'0°':fmtAng(k);
-  $('hCmb').textContent=fmtT(2.7255*k.Df);
+  setH('hSpeed',(k.u===0?'0':fmtBeta(k))+' <small>c</small>');
+  setT('hKms',k.u===0?'0 km/s':(k.b*299792.458<1e5?Math.round(k.b*299792.458).toLocaleString()+' km/s':(k.b*299792.458).toLocaleString(undefined,{maximumFractionDigits:3})+' km/s'));
+  setT('hGamma',k.g<1.0001?k.g.toFixed(8):k.g<10?k.g.toFixed(4):fmtNum(k.g));
+  setT('hDf','×'+(k.Df<10?k.Df.toFixed(4):fmtNum(k.Df))+' (bluer)');
+  setT('hDb','×'+(k.Db>0.1?k.Db.toFixed(4):fmtNum(k.Db))+' (redder)');
+  setT('hHalf',fmtDeg(Math.acos(k.b)*R2D)+' of the bow');
+  setT('hShift',k.u===0?'0°':fmtAng(k));
+  setT('hCmb',fmtT(2.7255*k.Df));
   const a=1.0323; // 1 g in units of c per year
-  $('hTau').textContent=k.u===0?'—':fmtTime(S.phi/a);
-  $('hT').textContent=k.u===0?'—':fmtTime(Math.sinh(S.phi)/a)+' · '+fmtLy((Math.cosh(S.phi)-1)/a);
-  for(const [test,h,p] of REGIMES){ if(test(k)){ $('exH').textContent=h; $('exP').innerHTML=p(k); break; } }
+  setT('hTau',k.u===0?'—':fmtTime(S.phi/a));
+  setT('hT',k.u===0?'—':fmtTime(Math.sinh(S.phi)/a)+' · '+fmtLy((Math.cosh(S.phi)-1)/a));
+  for(const [test,h,p] of REGIMES){ if(test(k)){ setT('exH',h); setH('exP',p(k)); break; } }
 }
 
 // ===================================================================== overlay
@@ -837,7 +841,7 @@ function resize(){
   return dpr;
 }
 function frame(now){
-  const dt=Math.min(0.1,(now-last)/1000); last=now;
+  const dt=Math.min(0.25,(now-last)/1000); last=now;
   const dpr=resize();
   if(S.thrust){
     S.phi=Math.max(0,Math.min(PHI_MAX,S.phi+S.thrust*S.g*1.0323*S.warp*dt));
@@ -895,7 +899,7 @@ function frame(now){
   }
   setCommon(P_STAR);
   gl.uniform1f(P_STAR.u.uK,K); gl.uniform1f(P_STAR.u.uSat,S.sat); gl.uniform1f(P_STAR.u.uPx,dpr);
-  gl.uniform1f(P_STAR.u.uMaxPt,Math.min(gl.getParameter(gl.ALIASED_POINT_SIZE_RANGE)[1],96*dpr));
+  gl.uniform1f(P_STAR.u.uMaxPt,Math.min(MAX_POINT,64*dpr));
   gl.bindVertexArray(starVAO); gl.drawArrays(gl.POINTS,0,STAR.n);
   gl.bindVertexArray(null);
   drawOverlay(k);
