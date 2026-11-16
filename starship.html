@@ -16,11 +16,12 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:13px/
 #gl.drag{cursor:grabbing}
 #ov{pointer-events:none}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)}
-#hud{position:fixed;left:12px;top:12px;padding:10px 12px;min-width:240px;max-width:330px;pointer-events:none}
+#hud{position:fixed;left:12px;top:12px;padding:10px 12px;width:340px;pointer-events:none}
 #hud .speed{font-size:26px;font-weight:600;letter-spacing:.3px;font-variant-numeric:tabular-nums}
 #hud .speed small{font-size:14px;color:var(--dim);font-weight:400}
-#hud table{border-collapse:collapse;margin-top:4px;font-variant-numeric:tabular-nums}
-#hud td{padding:1px 8px 1px 0;white-space:nowrap}
+#hud table{border-collapse:collapse;margin-top:4px;font-variant-numeric:tabular-nums;table-layout:fixed;width:100%}
+#hud col.k{width:160px}
+#hud td{padding:1px 8px 1px 0;white-space:nowrap;overflow:visible}
 #hud td:first-child{color:var(--dim)}
 .blue{color:var(--cool)} .red{color:var(--warm)}
 #explain{position:fixed;left:12px;bottom:12px;max-width:440px;padding:10px 12px;font-size:12.5px}
@@ -51,7 +52,8 @@ details p{margin:6px 0;color:var(--text);font-size:12px}
 @media (max-width:760px){
   #ctl{top:auto;left:8px;right:8px;width:auto;max-height:55vh;bottom:8px}
   #toggle{display:block}
-  #hud{left:8px;top:8px;min-width:0;max-width:calc(100% - 90px);font-size:12px;padding:8px}
+  #hud{left:8px;top:8px;width:calc(100% - 100px);max-width:300px;font-size:12px;padding:8px}
+  #hud col.k{width:150px}
   #hud .speed{font-size:20px}
   #explain{display:none}
   #hud .opt{display:none}
@@ -64,7 +66,7 @@ details p{margin:6px 0;color:var(--text);font-size:12px}
 
 <div id="hud" class="panel">
   <div class="speed" id="hSpeed">0 <small>c</small></div>
-  <table>
+  <table><colgroup><col class="k"><col></colgroup>
     <tr><td>Speed</td><td id="hKms">0 km/s</td></tr>
     <tr><td>Lorentz factor γ</td><td id="hGamma">1</td></tr>
     <tr><td>Doppler ahead</td><td id="hDf" class="blue">×1</td></tr>
