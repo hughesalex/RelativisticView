@@ -12,7 +12,7 @@
 *{box-sizing:border-box}
 html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:13px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overflow:hidden}
 #gl,#ov{position:fixed;inset:0;width:100%;height:100%;display:block}
-#gl{cursor:grab}
+#gl{cursor:grab;touch-action:none}
 #gl.drag{cursor:grabbing}
 #ov{pointer-events:none}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
@@ -104,7 +104,8 @@ details p{margin:6px 0;color:var(--text);font-size:12px}
   </section>
   <section>
     <h2>Heading &amp; view</h2>
-    <div class="row"><span class="lbl">Fly toward</span><select id="selHead" style="flex:1"></select></div>
+    <div class="row"><span class="lbl">Heading</span><span id="headV" style="flex:1"></span></div>
+    <div class="note"><b>Double-click</b> (or double-tap) anywhere in the sky to turn the ship and fly toward that point.</div>
     <div class="row"><span class="lbl">Look</span>
       <button data-look="0,0">Ahead</button><button data-look="-90,0">Left</button><button data-look="90,0">Right</button><button data-look="180,0">Behind</button><button data-look="0,89.9">Up</button><button data-look="0,-89.9">Down</button>
     </div>
@@ -584,8 +585,46 @@ for(const [n,phi] of PRESETS){ const b=document.createElement('button'); b.textC
 function setThrust(t){ S.thrust=t; $('bAcc').classList.toggle('on',t>0); $('bDec').classList.toggle('on',t<0); $('bHold').classList.toggle('on',t===0); if(t) requestDraw(); }
 $('bAcc').onclick=()=>setThrust(1); $('bDec').onclick=()=>setThrust(-1); $('bHold').onclick=()=>setThrust(0);
 $('selG').onchange=e=>S.g=+e.target.value; $('selW').onchange=e=>S.warp=+e.target.value;
-for(const [n,ra,dec] of HEADINGS){ const o=document.createElement('option'); o.textContent=n; $('selHead').appendChild(o); }
-$('selHead').onchange=e=>{ const h=HEADINGS[e.target.selectedIndex]; S.head=radec(h[1],h[2]); requestDraw(); };
+// heading changes: double-click / double-tap a point in the sky
+let turn=null; // {from,to,yaw0,pitch0,t0}
+function screenToObserved(cx,cy){
+  const W=cv.clientWidth, H=cv.clientHeight;
+  const nx=(cx/W)*2-1, ny=1-(cy/H)*2;
+  const px=nx/view.sx, py=ny/view.sy, q=px*px+py*py;
+  const dc=[4*px/(4+q),4*py/(4+q),(4-q)/(4+q)];
+  return norm(add(add(scl(view.R,dc[0]),view.U,dc[1]),view.F,dc[2]));
+}
+function observedToRest(d,k){ // inverse aberration, double precision
+  if(!S.ab) return d;
+  const f=S.head, a=add(d,f,-1), b=add(d,f), h=.5*dot(a,a), g=.5*dot(b,b);
+  const den=k.omb+k.b*h, cr=h<1?1-h*(1+k.b)/den:-1+g*k.omb/den;
+  return norm(add(scl(f,cr),add(a,f,h),1/(k.g*den)));
+}
+function setHeading(to){
+  turn={from:S.head,to,yaw0:S.yaw,pitch0:S.pitch,t0:performance.now()};
+  $('tip').style.display='none'; requestDraw();
+}
+function stepTurn(now){
+  if(!turn) return;
+  let t=Math.min(1,(now-turn.t0)/1400); const e=t*t*(3-2*t);
+  const a=turn.from, b=turn.to, ang=Math.acos(Math.max(-1,Math.min(1,dot(a,b))));
+  if(ang<1e-9) S.head=b;
+  else if(Math.PI-ang<1e-6) S.head=norm(add(scl(a,1-e),b,e).map((v,i)=>v+(e>0&&e<1?[0,0,1e-3][i]:0)));
+  else { const s=Math.sin(ang); S.head=norm(add(scl(a,Math.sin((1-e)*ang)/s),b,Math.sin(e*ang)/s)); }
+  S.yaw=turn.yaw0*(1-e); S.pitch=turn.pitch0*(1-e);
+  if(t>=1){ S.head=turn.to; turn=null; }
+  need=true;
+}
+const BRIGHT=[]; for(const [i,nm] of SKY.names){ const inf=STAR.info[i]; if(inf.mag<2.6) BRIGHT.push([nm,[STAR.arr[i*5],STAR.arr[i*5+1],STAR.arr[i*5+2]]]); }
+let lastHeadTxt='';
+function headingText(){
+  const h=S.head, ra=((Math.atan2(h[1],h[0])*R2D)+360)%360, dec=Math.asin(Math.max(-1,Math.min(1,h[2])))*R2D;
+  const rh=Math.floor(ra/15), rm=Math.round((ra/15-rh)*60)%60;
+  let best=null, bd=Math.cos(12*D2R);
+  for(const [nm,v] of BRIGHT){ const c=dot(v,h); if(c>bd){bd=c;best=nm;} }
+  const near=best?(bd>Math.cos(0.5*D2R)?' · '+best:' · near '+best):'';
+  return `RA ${rh}h ${String(rm).padStart(2,'0')}m, Dec ${dec>=0?'+':'−'}${Math.abs(dec).toFixed(1)}°${near}`;
+}
 document.querySelectorAll('[data-look]').forEach(b=>b.onclick=()=>{ const [y,p]=b.dataset.look.split(',').map(Number); S.yaw=y; S.pitch=p; requestDraw(); });
 const fovEl=$('fov');
 const FMIN=0.05, FMAX=300, sliderToFov=v=>FMIN*Math.pow(FMAX/FMIN,v/1000), fovToSlider=f=>Math.round(Math.log(f/FMIN)/Math.log(FMAX/FMIN)*1000);
@@ -601,7 +640,7 @@ if(innerWidth<=760) $('ctl').classList.add('hidden');
 $('exX').onclick=()=>$('explain').style.display='none';
 
 // mouse / touch
-let drag=null, pinch=null;
+let drag=null, pinch=null, lastTap=null;
 cv.addEventListener('pointerdown',e=>{ cv.setPointerCapture(e.pointerId); drag={x:e.clientX,y:e.clientY,x0:e.clientX,y0:e.clientY,id:e.pointerId}; cv.classList.add('drag'); });
 cv.addEventListener('pointermove',e=>{
   if(!drag||e.pointerId!==drag.id||pinch) return;
@@ -612,7 +651,14 @@ cv.addEventListener('pointermove',e=>{
 });
 cv.addEventListener('pointerup',e=>{
   cv.classList.remove('drag');
-  if(drag && Math.hypot(e.clientX-drag.x0,e.clientY-drag.y0)<4) pick(e.clientX,e.clientY); else $('tip').style.display='none';
+  const tap=drag && Math.hypot(e.clientX-drag.x0,e.clientY-drag.y0)<(e.pointerType==='touch'?10:4);
+  if(tap){
+    const now=performance.now();
+    if(lastTap && now-lastTap.t<400 && Math.hypot(e.clientX-lastTap.x,e.clientY-lastTap.y)<(e.pointerType==='touch'?30:8)){
+      lastTap=null;
+      setHeading(observedToRest(screenToObserved(e.clientX,e.clientY),kin()));
+    } else { lastTap={t:now,x:e.clientX,y:e.clientY}; pick(e.clientX,e.clientY); }
+  } else $('tip').style.display='none';
   drag=null;
 });
 cv.addEventListener('wheel',e=>{ e.preventDefault(); S.fov=Math.max(FMIN,Math.min(FMAX,S.fov*Math.exp(e.deltaY*0.0012))); fovEl.value=fovToSlider(S.fov); requestDraw(); },{passive:false});
@@ -795,6 +841,7 @@ function frame(now){
     if(S.phi===0||S.phi===PHI_MAX) setThrust(0);
     need=true;
   }
+  stepTurn(now);
   const k=kin();
   // camera
   const C=camBasis(), W=cv.width, H=cv.height, aspect=W/H;
@@ -837,6 +884,7 @@ function frame(now){
   gl.bindVertexArray(null);
   drawOverlay(k);
   updateHUD(k);
+  const ht=headingText(); if(ht!==lastHeadTxt){ $('headV').textContent=ht; lastHeadTxt=ht; }
   if(!drag) spd.value=phiToSlider(S.phi);
   $('fovV').textContent=S.fov<1?S.fov.toFixed(2)+'°':S.fov<10?S.fov.toFixed(1)+'°':Math.round(S.fov)+'°';
   requestAnimationFrame(frame);
