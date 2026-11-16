@@ -244,8 +244,8 @@ function b64bytes(s){const bin=atob(s), a=new Uint8Array(bin.length); for(let i=
 // stars: [dir x,y,z, mag, log10 T]
 const STAR = (function(){
   const b=b64bytes(SKY.stars), n=b.length/6, dv=new DataView(b.buffer);
-  const arr=new Float32Array(n*5), info=[];
-  const desig=SKY.desig.split('|'), names={};
+  const arr=new Float32Array(n*5);   // everything per-star lives in typed arrays: no per-star JS objects for the GC to trace
+  const names={};
   for(const [i,nm] of SKY.names) names[i]=nm;
   for(let i=0;i<n;i++){
     const ra=dv.getUint16(i*6,true)/65535*360, dec=dv.getUint16(i*6+2,true)/65535*180-90;
@@ -253,9 +253,10 @@ const STAR = (function(){
     let bv=b[i*6+5]/255*2.8-0.5; bv=Math.max(-0.35,Math.min(2.0,bv));
     const T=4600*(1/(0.92*bv+1.7)+1/(0.92*bv+0.62));
     const d=radec(ra,dec);
-    arr.set([d[0],d[1],d[2],mag,Math.log10(T)],i*5);
-    info.push({ra,dec,mag,T,bv,name:names[i]||'',desig:desig[i]||''});
+    arr[i*5]=d[0]; arr[i*5+1]=d[1]; arr[i*5+2]=d[2]; arr[i*5+3]=mag; arr[i*5+4]=Math.log10(T);
   }
+  let desig=null; // Bayer/Flamsteed designations, split only when first needed (star click)
+  const info=i=>{ if(!desig) desig=SKY.desig.split('|'); const mag=arr[i*5+3], T=Math.pow(10,arr[i*5+4]); return {mag,T,name:names[i]||'',desig:desig[i]||''}; };
   return {n,arr,info};
 })();
 
@@ -619,7 +620,7 @@ function stepTurn(now){
   if(t>=1){ S.head=turn.to; turn=null; }
   need=true;
 }
-const BRIGHT=[]; for(const [i,nm] of SKY.names){ const inf=STAR.info[i]; if(inf.mag<2.6) BRIGHT.push([nm,[STAR.arr[i*5],STAR.arr[i*5+1],STAR.arr[i*5+2]]]); }
+const BRIGHT=[]; for(const [i,nm] of SKY.names){ if(STAR.arr[i*5+3]<2.6) BRIGHT.push([nm,[STAR.arr[i*5],STAR.arr[i*5+1],STAR.arr[i*5+2]]]); }
 let lastHeadTxt='';
 function headingText(){
   const h=S.head, ra=((Math.atan2(h[1],h[0])*R2D)+360)%360, dec=Math.asin(Math.max(-1,Math.min(1,h[2])))*R2D;
@@ -687,13 +688,13 @@ function pick(cx,cy){
   const k=kin(); let best=null, bd=14*14;
   const lK=view.logK10;
   for(let i=0;i<STAR.n;i++){
-    const inf=STAR.info[i], a=STAR.arr;
+    const a=STAR.arr;
     const [o,D]=aberJS([a[i*5],a[i*5+1],a[i*5+2]],k);
     const p=projJS(o); if(!p) continue;
     const d2=(p[0]-cx)**2+(p[1]-cy)**2; if(d2>bd) continue;
     const lT=a[i*5+4], lD=Math.log10(D);
     const dm=S.beam?(bbJS(lT+lD)[3]-bbJS(lT)[3])-2*lD:0;
-    const mObs=inf.mag-2.5*dm;
+    const mObs=a[i*5+3]-2.5*dm;
     if(mObs-2.5*lK>8.5) continue;
     // prefer brighter stars among close ones
     const score=d2+ (mObs-2.5*lK)*6;
@@ -701,7 +702,7 @@ function pick(cx,cy){
   }
   const tip=$('tip');
   if(!best){ tip.style.display='none'; return; }
-  const inf=STAR.info[best.i], s=[STAR.arr[best.i*5],STAR.arr[best.i*5+1],STAR.arr[best.i*5+2]];
+  const inf=STAR.info(best.i), s=[STAR.arr[best.i*5],STAR.arr[best.i*5+1],STAR.arr[best.i*5+2]];
   const th=Math.acos(Math.max(-1,Math.min(1,dot(s,S.head))))*R2D, thO=Math.acos(Math.max(-1,Math.min(1,dot(best.o,S.head))))*R2D;
   const name=inf.name||inf.desig||'Catalogue star';
   tip.innerHTML=`<b>${name}</b>${inf.name&&inf.desig?' · '+inf.desig:''}<br>
@@ -779,6 +780,10 @@ function updateHUD(k){
 }
 
 // ===================================================================== overlay
+// label directions, computed once
+const DSO_DIRS=DSOS.map(d=>[d[0],radec(d[1],d[2])]);
+const STAR_LABELS=SKY.names.filter(([i,nm])=>STAR.arr[i*5+3]<=1.6||['Polaris','Rigil Kentaurus','Alnilam','Mizar'].includes(nm)).map(([i,nm])=>[nm,[STAR.arr[i*5],STAR.arr[i*5+1],STAR.arr[i*5+2]]]);
+const CON_LABELS=SKY.clabels.map(([n,ra,dec])=>[n,radec(ra,dec)]);
 function drawOverlay(k){
   const dpr=view.dpr, W=ov.width/dpr, H=ov.height/dpr;
   ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,W,H);
@@ -817,18 +822,14 @@ function drawOverlay(k){
     mark(f,'heading','rgba(140,220,140,.9)'); mark(scl(f,-1),'directly behind','rgba(255,150,120,.8)');
   }
   if($('oDso').checked){
-    for(const d of DSOS){ const [o]=aberJS(radec(d[1],d[2]),k); label(o,d[0],'rgba(200,170,255,.85)',10); }
+    for(const d of DSO_DIRS){ const [o]=aberJS(d[1],k); label(o,d[0],'rgba(200,170,255,.85)',10); }
   }
   if($('oStar').checked){
-    for(const [i,nm] of SKY.names){
-      const inf=STAR.info[i]; if(inf.mag>1.6&&nm!=='Polaris'&&nm!=='Rigil Kentaurus'&&nm!=='Alnilam'&&nm!=='Mizar') continue;
-      const a=STAR.arr; const [o]=aberJS([a[i*5],a[i*5+1],a[i*5+2]],k);
-      label(o,nm,'rgba(230,220,180,.8)',7);
-    }
+    for(const [nm,v] of STAR_LABELS){ const [o]=aberJS(v,k); label(o,nm,'rgba(230,220,180,.8)',7); }
   }
   if($('oCon').checked){
     ctx.font='11px system-ui,sans-serif';
-    for(const [n,ra,dec] of SKY.clabels){ const [o]=aberJS(radec(ra,dec),k); const p=projJS(o); if(!p) continue;
+    for(const [n,v] of CON_LABELS){ const [o]=aberJS(v,k); const p=projJS(o); if(!p) continue;
       const w=ctx.measureText(n).width; if(!free(p[0]-w/2,p[1]-6,w,12)) continue; ctx.fillStyle='rgba(120,160,230,.75)'; ctx.fillText(n,p[0]-w/2,p[1]); }
   }
 }
