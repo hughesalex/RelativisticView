@@ -10,7 +10,7 @@ At low speeds the sky looks the same in every direction. As you speed up, three 
 - **Doppler colour shift.** Each star's blackbody spectrum is shifted, so stars ahead look hotter and bluer, and stars behind look cooler and redder.
 - **Beaming.** Stars ahead get brighter and stars behind fade. At extreme speeds, stars ahead also fade, because their light shifts into the ultraviolet. Above γ ≈ 150, the cosmic microwave background starts to glow dead ahead.
 
-![The view ahead at 0.9c](screenshot.jpg)
+[![The view ahead at 0.9c](screenshot.jpg)](https://hughesalex.github.io/RelativisticView/starship.html)
 
 ## Features
 
